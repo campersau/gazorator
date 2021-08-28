@@ -1,87 +1,124 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Dynamic;
-using System.IO;
-using System.Linq;
-using System.Reflection;
-using System.Threading.Tasks;
+﻿using Gazorator.Extensions;
 using Gazorator.Razor;
 using Gazorator.Scripting;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
+using System.Threading.Tasks;
 
 namespace Gazorator
 {
     public abstract class Gazorator
     {
-        protected TextWriter Output { get; }
-        protected IEnumerable<Assembly> References { get; } = new List<Assembly>();
-        protected Action<dynamic> ConfigureViewBag { get; }
-        protected IEnumerable<KeyValuePair<string, object>> ViewBag { get; }
-
-        protected Gazorator(TextWriter output = null, Action<dynamic> configureViewBag = null, params Assembly[] references)
+        public static GazoratorFactory<TRazorScriptHost> Compile<TRazorScriptHost>(string filePath, IEnumerable<Assembly> references = null) where TRazorScriptHost : RazorScriptHost
         {
-            Output = output ?? TextWriter.Null;
-            ConfigureViewBag = configureViewBag;
-            References = new List<Assembly>(references);
+            var csharpScript = CSharpScriptRazorGenerator.Generate(filePath);
+
+            var razorContentGenerator = new RazorContentGenerator<TRazorScriptHost>(references);
+            var factory = razorContentGenerator.Generate(csharpScript);
+
+            return new GazoratorFactory<TRazorScriptHost>(factory);
         }
 
-        protected Gazorator(TextWriter output = null, IEnumerable<KeyValuePair<string, object>> viewBag = null, params Assembly[] references)
+        public static GazoratorFactory<TRazorScriptHost> CompileTemplate<TRazorScriptHost>(string template, IEnumerable<Assembly> references = null) where TRazorScriptHost : RazorScriptHost
         {
-            Output = output ?? TextWriter.Null;
-            ViewBag = viewBag;
-            References = new List<Assembly>(references);
+            return WriteTemplateFile(template, tempFile => Compile<TRazorScriptHost>(tempFile, references));
         }
 
-        public static Gazorator Default => new DefaultGazorator(TextWriter.Null, configureViewBag: null);
-
-        public Gazorator<TModel> WithModel<TModel>(TModel model)
+        public static GazoratorFactory Compile(string filePath, IEnumerable<Assembly> references = null)
         {
-            return new Gazorator<TModel>(Output, model, ConfigureViewBag, References.ToArray());
+            var csharpScript = CSharpScriptRazorGenerator.Generate(filePath);
+
+            var razorContentGenerator = new RazorContentGenerator<RazorScriptHost>(references);
+            var factory = razorContentGenerator.Generate(csharpScript);
+
+            return new GazoratorFactory(factory);
         }
 
-        public Gazorator WithOutput(TextWriter output)
+        public static GazoratorFactory CompileTemplate(string template, IEnumerable<Assembly> references = null)
         {
-            return new DefaultGazorator(output, ConfigureViewBag, References.ToArray());
+            return WriteTemplateFile(template, tempFile => Compile(tempFile, references));
         }
 
-        public Gazorator WithReferences(params Assembly[] references)
+        public static GazoratorFactory<TRazorScriptHost> CompileModel<TRazorScriptHost, TModel>(string filePath, IEnumerable<Assembly> references = null) where TRazorScriptHost : RazorScriptHost<TModel>
         {
-            return new DefaultGazorator(Output, ConfigureViewBag, references);
+            if (typeof(TModel).IsDynamic())
+            {
+                throw new InvalidOperationException("The Model is dynamic please use CompileDynamicModel instead.");
+            }
+
+            var csharpScript = CSharpScriptRazorGenerator.Generate(filePath);
+
+            var razorContentGenerator = new RazorContentGenerator<TRazorScriptHost, TModel>(references);
+            var factory = razorContentGenerator.Generate(csharpScript);
+
+            return new GazoratorFactory<TRazorScriptHost>(factory);
         }
 
-        public Gazorator WithViewBag(Action<dynamic> configureViewBag)
+        public static GazoratorFactory<TRazorScriptHost> CompileModelTemplate<TRazorScriptHost, TModel>(string template, IEnumerable<Assembly> references = null) where TRazorScriptHost : RazorScriptHost<TModel>
         {
-            return new DefaultGazorator(Output, configureViewBag, References.ToArray());
+            return WriteTemplateFile(template, tempFile => CompileModel<TRazorScriptHost, TModel>(tempFile, references));
         }
 
-        public Gazorator WithViewBag(IEnumerable<KeyValuePair<string, object>> viewBag)
+        public static GazoratorModelFactory<TModel> CompileModel<TModel>(string filePath, IEnumerable<Assembly> references = null)
         {
-            return new DefaultGazorator(Output, viewBag, References.ToArray());
+            if (typeof(TModel).IsDynamic())
+            {
+                throw new InvalidOperationException("The Model is dynamic please use CompileDynamicModel instead.");
+            }
+
+            var csharpScript = CSharpScriptRazorGenerator.Generate(filePath);
+
+            var razorContentGenerator = new RazorContentGenerator<RazorScriptHost<TModel>, TModel>(references);
+            var factory = razorContentGenerator.Generate(csharpScript);
+
+            return new GazoratorModelFactory<TModel>(factory);
         }
 
-        public virtual Task ProcessAsync(string filePath)
+        public static GazoratorModelFactory<TModel> CompileModelTemplate<TModel>(string template, IEnumerable<Assembly> references = null)
         {
-            var razorGenerator = new CSharpScriptRazorGenerator(Path.GetDirectoryName(filePath));
-            var csharpScript = razorGenerator.Generate(filePath);
-
-            var viewBag = new DynamicViewBag(ViewBag);
-            ConfigureViewBag?.Invoke(viewBag);
-
-            var razorContentGenerator = new RazorContentGenerator(Output, References, viewBag);
-            return razorContentGenerator.Generate(csharpScript);
+            return WriteTemplateFile(template, tempFile => CompileModel<TModel>(tempFile, references));
         }
 
-        public virtual async Task ProcessTemplateAsync(string template)
+        public static GazoratorFactory<TRazorScriptHost> CompileDynamicModel<TRazorScriptHost, TModel>(string filePath, IEnumerable<Assembly> references = null) where TRazorScriptHost : RazorScriptHostDynamic
+        {
+            var csharpScript = CSharpScriptRazorGenerator.Generate(filePath);
+
+            var razorContentGenerator = new RazorContentGenerator<TRazorScriptHost, TModel>(references);
+            var factory = razorContentGenerator.Generate(csharpScript);
+
+            return new GazoratorFactory<TRazorScriptHost>(factory);
+        }
+
+        public static GazoratorFactory<TRazorScriptHost> CompileDynamicModelTemplate<TRazorScriptHost, TModel>(string template, IEnumerable<Assembly> references = null) where TRazorScriptHost : RazorScriptHostDynamic
+        {
+            return WriteTemplateFile(template, tempFile => CompileDynamicModel<TRazorScriptHost, TModel>(tempFile, references));
+        }
+
+        public static GazoratorDynamicModelFactory<TModel> CompileDynamicModel<TModel>(string filePath, IEnumerable<Assembly> references = null)
+        {
+            var csharpScript = CSharpScriptRazorGenerator.Generate(filePath);
+
+            var razorContentGenerator = new RazorContentGenerator<RazorScriptHostDynamic, TModel>(references);
+            var factory = razorContentGenerator.Generate(csharpScript);
+
+            return new GazoratorDynamicModelFactory<TModel>(factory);
+        }
+
+        public static GazoratorDynamicModelFactory<TModel> CompileDynamicModelTemplate<TModel>(string template, IEnumerable<Assembly> references = null)
+        {
+            return WriteTemplateFile(template, tempFile => CompileDynamicModel<TModel>(tempFile, references));
+        }
+
+        private static T WriteTemplateFile<T>(string template, Func<string, T> func)
         {
             var tempFile = Path.GetTempFileName();
             try
             {
-                using (var stream = File.OpenWrite(tempFile))
-                using (var writer = new StreamWriter(stream))
-                {
-                    await writer.WriteAsync(template);
-                }
+                File.WriteAllText(tempFile, template);
 
-                await ProcessAsync(tempFile);
+                return func(tempFile);
             }
             finally
             {
@@ -91,65 +128,66 @@ namespace Gazorator
                 }
             }
         }
+    }
 
-        private sealed class DefaultGazorator : Gazorator
+
+    public class GazoratorFactory<TRazorScriptHost> where TRazorScriptHost : RazorScriptHostBase
+    {
+        private readonly Func<TRazorScriptHost, Task> _factory;
+
+        internal GazoratorFactory(Func<TRazorScriptHost, Task> factory)
         {
-            public DefaultGazorator(TextWriter output = null, Action<dynamic> configureViewBag = null, params Assembly[] references) : base(output, configureViewBag, references)
-            {
-            }
+            _factory = factory;
+        }
 
-            public DefaultGazorator(TextWriter output = null, IEnumerable<KeyValuePair<string, object>> viewbag = null, params Assembly[] references) : base(output, viewbag, references)
-            {
-            }
+        public virtual Task ProcessAsync(TRazorScriptHost razorScriptHost)
+        {
+            return _factory(razorScriptHost);
         }
     }
 
-    public sealed class Gazorator<TModel> : Gazorator
+    public sealed class GazoratorFactory : GazoratorFactory<RazorScriptHost>
     {
-        private readonly TModel _model;
-
-        internal Gazorator(TextWriter output, TModel model, Action<dynamic> configureViewBag, params Assembly[] references)
-            : base(output, configureViewBag, references)
+        internal GazoratorFactory(Func<RazorScriptHost, Task> factory) : base(factory)
         {
-            _model = model;
         }
 
-        internal Gazorator(TextWriter output, TModel model, IEnumerable<KeyValuePair<string, object>> viewBag, params Assembly[] references)
-            : base(output, viewBag, references)
+        public Task ProcessAsync(TextWriter output, Action<dynamic> configureViewBag = null)
         {
-            _model = model;
+            var viewBag = new DynamicViewBag();
+            configureViewBag?.Invoke(viewBag);
+
+            return ProcessAsync(new RazorScriptHost(output, viewBag));
+        }
+    }
+
+    public sealed class GazoratorModelFactory<TModel> : GazoratorFactory<RazorScriptHost<TModel>>
+    {
+        internal GazoratorModelFactory(Func<RazorScriptHost<TModel>, Task> factory) : base(factory)
+        {
         }
 
-        public new Gazorator<TModel> WithOutput(TextWriter output)
+        public Task ProcessAsync(TextWriter output, TModel model, Action<dynamic> configureViewBag = null)
         {
-            return new Gazorator<TModel>(output, _model, ConfigureViewBag, References.ToArray());
+            var viewBag = new DynamicViewBag();
+            configureViewBag?.Invoke(viewBag);
+
+            return ProcessAsync(new RazorScriptHost<TModel>(output, model, viewBag));
+        }
+    }
+
+    public sealed class GazoratorDynamicModelFactory<TModel> : GazoratorFactory<RazorScriptHostDynamic>
+    {
+        internal GazoratorDynamicModelFactory(Func<RazorScriptHostDynamic, Task> factory) : base(factory)
+        {
         }
 
-        public new Gazorator<TModel> WithReferences(params Assembly[] references)
+        public Task ProcessAsync(TextWriter output, TModel model, Action<dynamic> configureViewBag = null)
         {
-            return new Gazorator<TModel>(Output, _model, ConfigureViewBag, references);
-        }
+            var viewBag = new DynamicViewBag();
+            configureViewBag?.Invoke(viewBag);
 
-        public new Gazorator<TModel> WithViewBag(Action<dynamic> configureViewBag)
-        {
-            return new Gazorator<TModel>(Output, _model, configureViewBag, References.ToArray());
-        }
-
-        public new Gazorator<TModel> WithViewBag(IEnumerable<KeyValuePair<string, object>> viewBag)
-        {
-            return new Gazorator<TModel>(Output, _model, viewBag, References.ToArray());
-        }
-
-        public override Task ProcessAsync(string filePath)
-        {
-            var razorGenerator = new CSharpScriptRazorGenerator(Path.GetDirectoryName(filePath));
-            var csharpScript = razorGenerator.Generate(filePath);
-
-            var viewBag = new DynamicViewBag(ViewBag);
-            ConfigureViewBag?.Invoke(viewBag);
-
-            var razorContentGenerator = new RazorContentGenerator<TModel>(_model, Output, References, viewBag);
-            return razorContentGenerator.Generate(csharpScript);
+            return ProcessAsync(new RazorScriptHostDynamic(output, model, viewBag));
         }
     }
 }

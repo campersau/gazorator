@@ -19,13 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="Views\Sample.cshtml">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="Views\Xamarin.cshtml">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="Views\CakeIssues.cshtml">
+    <None Update="Views\*.cshtml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

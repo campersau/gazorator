@@ -1,0 +1,15 @@
+﻿@inherits Gazorator.Console.CustomRazorScriptHost
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>@PageTitle</title>
+    <meta charset="utf-8" />
+</head>
+<body>
+    <div>
+        <p>@ViewBag.Test</p>
+        @Html.Raw("<h2>Output some html!</h2>")
+    </div>
+</body>
+</html>

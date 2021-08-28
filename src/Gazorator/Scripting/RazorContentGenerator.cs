@@ -1,36 +1,32 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Dynamic;
-using System.IO;
-using System.Linq;
-using System.Reflection;
-using System.Threading.Tasks;
-using Gazorator.Extensions;
+﻿using Gazorator.Extensions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Scripting;
 using Microsoft.CodeAnalysis.Scripting;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using System.Threading.Tasks;
 
 namespace Gazorator.Scripting
 {
-    internal abstract class RazorContentGeneratorBase
+    internal abstract class RazorContentGeneratorBase<TRazorScriptHost>
     {
-        private IReadOnlyCollection<Assembly> _references;
-        protected readonly DynamicViewBag _viewBag;
+        private readonly IReadOnlyCollection<Assembly> _references;
 
-        protected RazorContentGeneratorBase(IEnumerable<Assembly> references, DynamicViewBag viewBag)
+        protected RazorContentGeneratorBase(IEnumerable<Assembly> references)
         {
-            _references = new List<Assembly>(references);
-            _viewBag = viewBag;
+            _references = new List<Assembly>(references ?? Enumerable.Empty<Assembly>());
         }
 
-        public Task Generate(string csharpScript)
+        public Func<TRazorScriptHost, Task> Generate(string csharpScript)
         {
             var options = ScriptOptions.Default
                 .WithReferences(GetMetadataReferences())
                 .WithImports("System")
                 .WithMetadataResolver(ScriptMetadataResolver.Default);
 
-            var roslynScript = CSharpScript.Create(csharpScript, options, GetGlobalsType());
+            var roslynScript = CSharpScript.Create(csharpScript, options, typeof(TRazorScriptHost));
 
             var compilation = roslynScript.GetCompilation();
             var diagnostics = compilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error);
@@ -41,7 +37,9 @@ namespace Gazorator.Scripting
                 throw new InvalidOperationException($"Error(s) occurred when compiling build script:{Environment.NewLine}{errorMessages}");
             }
 
-            return roslynScript.RunAsync(GetGlobalsObject());
+            var @delegate = roslynScript.CreateDelegate();
+
+            return globalsObject => @delegate(globalsObject);
         }
 
         protected virtual IEnumerable<MetadataReference> GetMetadataReferences()
@@ -52,6 +50,7 @@ namespace Gazorator.Scripting
             yield return MetadataReference.CreateFromFile(typeof(System.Xml.XmlReader).Assembly.Location); // System.Xml
             yield return MetadataReference.CreateFromFile(typeof(System.Xml.Linq.XDocument).Assembly.Location); // System.Xml.Linq
             yield return MetadataReference.CreateFromFile(typeof(System.Data.DataTable).Assembly.Location); // System.Data
+            yield return MetadataReference.CreateFromFile(typeof(Microsoft.CSharp.RuntimeBinder.CSharpArgumentInfo).Assembly.Location); // dynamic
 
             var entryAssembly = Assembly.GetEntryAssembly();
             if (entryAssembly != null)
@@ -76,88 +75,35 @@ namespace Gazorator.Scripting
                 yield return MetadataReference.CreateFromFile(reference.Location);
             }
         }
-
-        protected abstract Type GetGlobalsType();
-
-        protected abstract RazorScriptHostBase GetGlobalsObject();
     }
 
-    internal sealed class RazorContentGenerator : RazorContentGeneratorBase
+
+    internal sealed class RazorContentGenerator<TRazorScriptHost> : RazorContentGeneratorBase<TRazorScriptHost>
     {
-        private readonly TextWriter _textWriter;
-
-        public RazorContentGenerator(TextWriter textWriter, IEnumerable<Assembly> references, DynamicViewBag viewBag) : base(references, viewBag)
+        public RazorContentGenerator(IEnumerable<Assembly> references) : base(references)
         {
-            _textWriter = textWriter ?? throw new ArgumentNullException(nameof(textWriter));
-        }
-
-        protected override RazorScriptHostBase GetGlobalsObject()
-        {
-            return new RazorScriptHost(_textWriter, _viewBag);
-        }
-
-        protected override Type GetGlobalsType()
-        {
-            return typeof(RazorScriptHost);
         }
     }
 
-    internal sealed class RazorContentGenerator<TModel> : RazorContentGeneratorBase
+    internal sealed class RazorContentGenerator<TRazorScriptHost, TModel> : RazorContentGeneratorBase<TRazorScriptHost>
     {
-        private readonly TextWriter _textWriter;
-        private readonly TModel _model;
         private readonly bool _isDynamicAssembly;
 
-        public RazorContentGenerator(TModel model, TextWriter textWriter, IEnumerable<Assembly> references, DynamicViewBag viewBag) : base(references, viewBag)
+        public RazorContentGenerator(IEnumerable<Assembly> references) : base(references)
         {
-            _textWriter = textWriter ?? throw new ArgumentNullException(nameof(textWriter));
-            if (typeof(TModel).IsNullable() && model == null)
-            {
-                throw new ArgumentNullException(nameof(model));
-            }
             if (typeof(TModel).IsNotPublic)
             {
                 throw new ArgumentException($"{typeof(TModel).GetType().FullName} must be public.");
             }
-            _model = model;
-            _isDynamicAssembly = typeof(TModel).Assembly.IsDynamic ||
-                string.IsNullOrEmpty(typeof(TModel).Assembly.Location);
+            _isDynamicAssembly = typeof(TModel).IsDynamic();
         }
 
         protected override IEnumerable<MetadataReference> GetMetadataReferences()
         {
             return _isDynamicAssembly ?
+                base.GetMetadataReferences() :
                 base.GetMetadataReferences()
-                    .Append(MetadataReference.CreateFromFile(typeof(Microsoft.CSharp.RuntimeBinder.CSharpArgumentInfo).Assembly.Location)) :
-                base.GetMetadataReferences()
-                    .Append(MetadataReference.CreateFromFile(typeof(Microsoft.CSharp.RuntimeBinder.CSharpArgumentInfo).Assembly.Location))
                     .Append(MetadataReference.CreateFromFile(typeof(TModel).Assembly.Location));
-        }
-
-        protected override RazorScriptHostBase GetGlobalsObject()
-        {
-            return _isDynamicAssembly ?
-                new RazorScriptHostDynamic(ToExpandoObject(_model), _textWriter, _viewBag):
-                new RazorScriptHost<TModel>(_model, _textWriter, _viewBag) as RazorScriptHostBase;
-        }
-
-        protected override Type GetGlobalsType()
-        {
-            return _isDynamicAssembly ?
-                typeof(RazorScriptHostDynamic) :
-                typeof(RazorScriptHost<TModel>);
-        }
-
-        private static ExpandoObject ToExpandoObject(TModel model)
-        {
-            IDictionary<string, object> expando = new ExpandoObject();
-
-            foreach(var property in typeof(TModel).GetProperties())
-            {
-                expando.Add(property.Name, property.GetValue(model));
-            }
-
-            return (ExpandoObject)expando;
         }
     }
 }

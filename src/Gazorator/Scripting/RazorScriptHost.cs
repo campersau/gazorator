@@ -1,7 +1,6 @@
 ﻿using Gazorator.Extensions;
 using System;
 using System.Collections.Generic;
-using System.Dynamic;
 using System.Globalization;
 using System.IO;
 using System.Text.Encodings.Web;
@@ -90,16 +89,16 @@ namespace Gazorator.Scripting
         }
     }
 
-    public sealed class RazorScriptHost : RazorScriptHostBase
+    public class RazorScriptHost : RazorScriptHostBase
     {
         public RazorScriptHost(TextWriter output, DynamicViewBag viewBag) : base(output, viewBag)
         {
         }
     }
 
-    public sealed class RazorScriptHost<TModel> : RazorScriptHostBase
+    public class RazorScriptHost<TModel> : RazorScriptHostBase
     {
-        public RazorScriptHost(TModel model, TextWriter output, DynamicViewBag viewBag) : base(output, viewBag)
+        public RazorScriptHost(TextWriter output, TModel model, DynamicViewBag viewBag) : base(output, viewBag)
         {
             if (typeof(TModel).IsNullable() && model == null)
             {
@@ -111,11 +110,11 @@ namespace Gazorator.Scripting
         public TModel Model { get; }
     }
 
-    public sealed class RazorScriptHostDynamic : RazorScriptHostBase
+    public class RazorScriptHostDynamic : RazorScriptHostBase
     {
-        private readonly ExpandoObject _model;
+        private readonly dynamic _model;
 
-        public RazorScriptHostDynamic(ExpandoObject model, TextWriter output, DynamicViewBag viewBag) : base(output, viewBag)
+        public RazorScriptHostDynamic(TextWriter output, dynamic model, DynamicViewBag viewBag) : base(output, viewBag)
         {
             _model = model ?? throw new ArgumentNullException(nameof(model));
         }

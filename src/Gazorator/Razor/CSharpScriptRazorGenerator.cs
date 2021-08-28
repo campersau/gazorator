@@ -1,16 +1,17 @@
 ﻿using System;
+using System.IO;
 using System.Linq;
 using Microsoft.AspNetCore.Razor.Language;
 using Microsoft.AspNetCore.Razor.Language.Extensions;
 
 namespace Gazorator.Razor
 {
-    internal sealed class CSharpScriptRazorGenerator
+    internal static class CSharpScriptRazorGenerator
     {
-        private readonly RazorProjectEngine _projectEngine;
-
-        public CSharpScriptRazorGenerator(string directoryRoot)
+        public static string Generate(string filePath)
         {
+            var directoryRoot = Path.GetDirectoryName(filePath);
+
             var fileSystem = RazorProjectFileSystem.Create(directoryRoot);
             var projectEngine = RazorProjectEngine.Create(RazorConfiguration.Default, fileSystem, builder =>
             {
@@ -25,13 +26,8 @@ namespace Gazorator.Razor
                 builder.Features.Add(new CSharpScriptDocumentClassifierPass());
             });
 
-            _projectEngine = projectEngine;
-        }
-
-        public string Generate(string filePath)
-        {
-            var razorItem = _projectEngine.FileSystem.GetItem(filePath);
-            var codeDocument = _projectEngine.Process(razorItem);
+            var razorItem = projectEngine.FileSystem.GetItem(filePath);
+            var codeDocument = projectEngine.Process(razorItem);
             var csharpDocument = codeDocument.GetCSharpDocument();
 
             if (csharpDocument.Diagnostics.Any())
